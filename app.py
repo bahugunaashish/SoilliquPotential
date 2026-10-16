@@ -58,7 +58,8 @@ def remove_blank_rows(frame: pd.DataFrame) -> pd.DataFrame:
 def reset_editor(frame: pd.DataFrame) -> None:
     st.session_state.layer_frame = frame[REQUIRED_COLUMNS + ["analyze"]].copy().reset_index(drop=True)
     st.session_state.soil_snapshot = st.session_state.layer_frame["soil_code"].fillna("").astype(str).tolist()
-    st.session_state.layer_count = len(st.session_state.layer_frame)
+    # Sync the widget on the next rerun, before its number_input is created.
+    st.session_state._pending_layer_count = len(st.session_state.layer_frame)
     st.session_state.pop("layer_editor", None)
     st.session_state.analysis_result = None
 
@@ -81,6 +82,14 @@ def resize_layers(count: int, units: str) -> pd.DataFrame:
             "analyze": True,
         }
     return frame.reset_index(drop=True)
+
+
+def on_layer_count_change(units: str) -> None:
+    frame = resize_layers(st.session_state.layer_count, units)
+    st.session_state.layer_frame = frame
+    st.session_state.soil_snapshot = frame["soil_code"].fillna("").astype(str).tolist()
+    st.session_state.pop("layer_editor", None)
+    st.session_state.analysis_result = None
 
 
 def on_table_change() -> None:
@@ -245,6 +254,8 @@ def display_results(results: pd.DataFrame, summary: dict, units: str) -> None:
 
 
 init_state()
+if "_pending_layer_count" in st.session_state:
+    st.session_state.layer_count = st.session_state.pop("_pending_layer_count")
 
 st.title("SoilliquPotential")
 st.caption("SPT-based liquefaction triggering screening from a layer-by-layer boring log.")
@@ -321,14 +332,12 @@ with left:
         max_value=50,
         step=1,
         key="layer_count",
+        on_change=on_layer_count_change,
+        args=(units,),
         help="Set the number of layers; new rows are appended at the current profile bottom.",
     )
 with right:
     uploaded = st.file_uploader("Import Excel or CSV", type=["xlsx", "csv"])
-
-if int(layer_count) != len(st.session_state.layer_frame):
-    resized = resize_layers(int(layer_count), units)
-    reset_editor(resized)
 
 if uploaded is not None:
     import_col1, import_col2 = st.columns([1, 2])
@@ -392,7 +401,6 @@ if "analyze" not in edited.columns:
     edited["analyze"] = True
 st.session_state.layer_frame = edited[REQUIRED_COLUMNS + ["analyze"]].reset_index(drop=True)
 st.session_state.soil_snapshot = st.session_state.layer_frame["soil_code"].fillna("").astype(str).tolist()
-st.session_state.layer_count = len(st.session_state.layer_frame)
 
 profile_col, _ = st.columns([1, 1.4])
 with profile_col:
