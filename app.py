@@ -275,6 +275,11 @@ with st.sidebar:
         else "Triggering PGA at FS = 1",
     )
     magnitude = st.number_input("Earthquake magnitude, Mw", 3.0, 9.5, 7.5, 0.1)
+    st.caption("MSF method: Idriss (1999) relationship for sand, as presented by Boulanger & Idriss (2014), Eq. 2.17.")
+    st.latex(r"\mathrm{MSF} = \min\left(6.9e^{-M_w/4} - 0.058,\;1.8\right)")
+    st.markdown(
+        "[Open Boulanger & Idriss (2014) report](https://faculty.engineering.ucdavis.edu/boulanger/wp-content/uploads/sites/71/2014/09/Boulanger_Idriss_CPT_and_SPT_Liq_triggering_CGM-14-01_20141.pdf)"
+    )
     pga_disabled = analysis_mode == "triggerPga"
     pga = st.number_input("Design surface PGA (g)", 0.01, 2.0, 0.30, 0.01, disabled=pga_disabled)
     depth_unit = "m" if units == "Metric" else "ft"
