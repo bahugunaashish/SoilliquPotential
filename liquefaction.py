@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 import pandas as pd
+from msf_methods import IDRISS_1999, msf_for_method
 
 GAMMA_W = 9.80665
 PA_KPA = 101.3
@@ -32,6 +33,29 @@ IMPORT_ALIASES = {
     "fines_percent": {"fines_percent", "fines_content", "fines"},
     "analyze": {"analyze", "include"},
 }
+
+
+def water_table_depth_from_inputs(
+    input_mode: str,
+    *,
+    depth_below_surface: float | None = None,
+    ground_surface_elevation: float | None = None,
+    water_table_elevation: float | None = None,
+) -> float:
+    """Return water-table depth relative to grade; positive is below grade.
+
+    Elevation inputs must use the same vertical datum (the app labels them MSL).
+    A negative result represents groundwater above the ground surface.
+    """
+    if input_mode == "Elevation above MSL":
+        if ground_surface_elevation is None or water_table_elevation is None:
+            raise ValueError("Enter both ground-surface and water-table elevations.")
+        return float(ground_surface_elevation) - float(water_table_elevation)
+    if input_mode == "Depth below ground surface":
+        if depth_below_surface is None:
+            raise ValueError("Enter the water-table depth below ground surface.")
+        return float(depth_below_surface)
+    raise ValueError("Choose either depth below ground surface or elevation above MSL.")
 
 
 def is_default_excluded(soil_code: Any) -> bool:
@@ -90,6 +114,7 @@ def calculate_profile(
     sampler: str,
     rd_mode: str,
     analysis_mode: str,
+    msf_method: str = IDRISS_1999,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Calculate SPT liquefaction screening for each layer in one boring log."""
     if frame.empty:
@@ -113,7 +138,7 @@ def calculate_profile(
     rod_length_m = rod_length * depth_scale
     cr = 0.75 if rod_length_m < 3 else 0.80 if rod_length_m < 4 else 0.85 if rod_length_m < 6 else 0.95 if rod_length_m < 10 else 1.0
     cs = 1.2 if sampler in {"withoutLiners", "nonStandard"} else 1.0
-    msf = min(6.9 * math.exp(-magnitude / 4.0) - 0.058, 1.8)
+    msf = msf_for_method(msf_method, magnitude)
     rd_magnitude = magnitude if rd_mode == "event" else 7.5
 
     results: list[dict[str, Any]] = []
@@ -239,6 +264,8 @@ def calculate_profile(
         "minimum_trigger_pga": minimum_trigger_pga,
         "governing_layer": governing_layer,
         "analysis_mode": analysis_mode,
+        "msf_method": msf_method,
+        "msf": msf,
     }
     return pd.DataFrame(results), summary
 

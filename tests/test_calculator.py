@@ -3,7 +3,14 @@ import unittest
 
 import pandas as pd
 
-from liquefaction import calculate_profile, is_default_excluded, normalize_import_frame, template_frame
+from liquefaction import (
+    calculate_profile,
+    is_default_excluded,
+    normalize_import_frame,
+    template_frame,
+    water_table_depth_from_inputs,
+)
+from msf_methods import IDRISS_1999, msf_for_method
 
 
 def calculate(frame, mode="factorOfSafety"):
@@ -23,6 +30,23 @@ def calculate(frame, mode="factorOfSafety"):
 
 
 class CalculatorTests(unittest.TestCase):
+    def test_water_table_depth_and_elevation_inputs_convert_consistently(self):
+        depth = water_table_depth_from_inputs(
+            "Depth below ground surface", depth_below_surface=2.0
+        )
+        elevation = water_table_depth_from_inputs(
+            "Elevation above MSL",
+            ground_surface_elevation=105.0,
+            water_table_elevation=103.0,
+        )
+        above_grade = water_table_depth_from_inputs(
+            "Elevation above MSL",
+            ground_surface_elevation=105.0,
+            water_table_elevation=106.0,
+        )
+        self.assertEqual(depth, elevation)
+        self.assertEqual(above_grade, -1.0)
+
     def test_template_calculates_stresses_and_defaults_ch_excluded(self):
         results, summary = calculate(template_frame())
         self.assertAlmostEqual(results.loc[0, "mid_depth"], 1.0)
@@ -63,6 +87,34 @@ class CalculatorTests(unittest.TestCase):
         frame.loc[1, "top_depth"] = 2.2
         with self.assertRaisesRegex(ValueError, "contiguous"):
             calculate(frame)
+
+    def test_idriss_1999_is_default_formula_and_capped(self):
+        self.assertAlmostEqual(msf_for_method(IDRISS_1999, 7.5), 1.0, places=2)
+        self.assertEqual(msf_for_method(IDRISS_1999, 4.5), 1.8)
+
+    def test_digitized_method_interpolates_and_rejects_extrapolation(self):
+        self.assertAlmostEqual(msf_for_method("Seed & Idriss (1982)", 6.0), 1.32)
+        with self.assertRaisesRegex(ValueError, "digitized only"):
+            msf_for_method("Ambraseys (1985)", 5.0)
+
+    def test_profile_uses_selected_msf_method(self):
+        frame = template_frame().iloc[:1].copy()
+        _, summary = calculate_profile(
+            frame,
+            units="Metric",
+            magnitude=7.5,
+            pga=0.3,
+            water_table=0.5,
+            energy_pct=60,
+            borehole_inches=4,
+            rod_length=6,
+            sampler="withLiners",
+            rd_mode="workbook",
+            analysis_mode="factorOfSafety",
+            msf_method="Seed & Idriss (1982)",
+        )
+        self.assertEqual(summary["msf_method"], "Seed & Idriss (1982)")
+        self.assertAlmostEqual(summary["msf"], msf_for_method("Seed & Idriss (1982)", 7.5))
 
 
 if __name__ == "__main__":

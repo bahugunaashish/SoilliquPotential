@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 from io import BytesIO
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -13,6 +14,13 @@ from liquefaction import (
     is_default_excluded,
     normalize_import_frame,
     template_frame,
+    water_table_depth_from_inputs,
+)
+from msf_methods import (
+    IDRISS_1999,
+    MSF_METHODS,
+    comparison_frame,
+    curve_frame,
 )
 
 st.set_page_config(page_title="SoilliquPotential", page_icon="🪨", layout="wide")
@@ -206,6 +214,7 @@ def render_profile(frame: pd.DataFrame, depth_unit: str) -> None:
 def display_results(results: pd.DataFrame, summary: dict, units: str) -> None:
     triggering = summary["analysis_mode"] == "triggerPga"
     col1, col2, col3 = st.columns(3)
+    st.caption(f"Detailed layer results use {summary['msf_method']} (MSF = {summary['msf']:.3f}).")
     if triggering:
         col1.metric("Governing triggering PGA", f'{summary["minimum_trigger_pga"]:.3f} g')
         col2.metric("Factor of safety at trigger", "1.00")
@@ -253,6 +262,45 @@ def display_results(results: pd.DataFrame, summary: dict, units: str) -> None:
     )
 
 
+def display_msf_comparison(comparison: pd.DataFrame) -> None:
+    st.subheader("Comparison across selected MSF methods")
+    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    if len(comparison) > 1:
+        st.bar_chart(comparison.set_index("MSF method")[["Minimum FS"]], height=260)
+        st.bar_chart(
+            comparison.set_index("MSF method")[["Minimum triggering PGA (g)"]],
+            height=260,
+        )
+
+
+def show_msf_methods(methods: list[str], magnitude: float) -> None:
+    st.subheader("Magnitude scaling factor methods")
+    st.caption(
+        "Digitized methods are approximate visual readings from the reference figure; "
+        "values between chart-read points use linear interpolation. Idriss (1999) is calculated from its equation."
+    )
+    st.caption("The chart below displays all methods. The sidebar selection controls which methods are used in the analysis.")
+    st.line_chart(curve_frame(MSF_METHODS).set_index("Mw"), height=380)
+    if methods:
+        try:
+            st.dataframe(comparison_frame(methods, magnitude), use_container_width=True, hide_index=True)
+        except ValueError as exc:
+            st.warning(str(exc))
+    else:
+        st.info("Select at least one MSF method to view its curve.")
+    figure_path = Path(__file__).parent / "assets" / "msf_reference_figure.png"
+    if figure_path.exists():
+        st.subheader("Source reference figure")
+        st.image(str(figure_path), use_container_width=True)
+        st.caption(
+            "Idriss, I.M., and Boulanger, R.W. (2010). SPT-based liquefaction triggering procedures. "
+            "Report UCD/CGM-10/02, University of California, Davis."
+        )
+        st.markdown(
+            "[Open the report PDF](https://faculty.engineering.ucdavis.edu/boulanger/wp-content/uploads/sites/71/2014/09/Idriss_Boulanger_SPT_Liquefaction_CGM-10-02.pdf)"
+        )
+
+
 init_state()
 if "_pending_layer_count" in st.session_state:
     st.session_state.layer_count = st.session_state.pop("_pending_layer_count")
@@ -275,16 +323,67 @@ with st.sidebar:
         else "Triggering PGA at FS = 1",
     )
     magnitude = st.number_input("Earthquake magnitude, Mw", 3.0, 9.5, 7.5, 0.1)
-    st.caption("MSF method: Idriss (1999) relationship for sand, as presented by Boulanger & Idriss (2014), Eq. 2.17.")
-    st.latex(r"\mathrm{MSF} = \min\left(6.9e^{-M_w/4} - 0.058,\;1.8\right)")
-    st.markdown(
-        "[Open Boulanger & Idriss (2014) report](https://faculty.engineering.ucdavis.edu/boulanger/wp-content/uploads/sites/71/2014/09/Boulanger_Idriss_CPT_and_SPT_Liq_triggering_CGM-14-01_20141.pdf)"
+    msf_methods = st.multiselect(
+        "MSF method(s)",
+        options=MSF_METHODS,
+        default=[IDRISS_1999],
+        help="Idriss (1999) is selected by default. Select additional methods to compare their curves and analysis results.",
     )
+    if IDRISS_1999 in msf_methods:
+        st.caption("Idriss (1999) sand relationship, capped at 1.8.")
+        st.latex(r"\mathrm{MSF} = \min\left(6.9e^{-M_w/4} - 0.058,\;1.8\right)")
     pga_disabled = analysis_mode == "triggerPga"
     pga = st.number_input("Design surface PGA (g)", 0.01, 2.0, 0.30, 0.01, disabled=pga_disabled)
     depth_unit = "m" if units == "Metric" else "ft"
     weight_unit = "kN/m³" if units == "Metric" else "pcf"
-    water_table = st.number_input(f"Water table depth ({depth_unit})", 0.0, 10000.0, 1.5, 0.1)
+    default_water_depth = 1.5 if units == "Metric" else 5.0
+    water_table_input_mode = st.radio(
+        "Water-table input format",
+        ["Depth below ground surface", "Elevation above MSL"],
+        horizontal=True,
+    )
+    if water_table_input_mode == "Depth below ground surface":
+        st.caption("Depth convention: measured downward from ground surface (zero at surface); negative depth means groundwater is above ground.")
+        water_table_depth_input = st.number_input(
+            f"Water-table depth from ground surface ({depth_unit})",
+            min_value=-10000.0,
+            max_value=10000.0,
+            value=default_water_depth,
+            step=0.1,
+            help="Positive depth is downward from ground surface. Enter a negative value if the water table is above ground.",
+        )
+        water_table = water_table_depth_from_inputs(
+            water_table_input_mode, depth_below_surface=water_table_depth_input
+        )
+        st.caption("Depth is measured downward from ground surface; zero is ground surface.")
+    else:
+        st.caption("Elevation convention: enter both elevations relative to mean sea level (MSL); elevations increase upward. The app subtracts water-table elevation from ground-surface elevation.")
+        ground_surface_elevation = st.number_input(
+            f"Ground-surface elevation above MSL ({depth_unit})",
+            min_value=-10000.0,
+            max_value=10000.0,
+            value=0.0,
+            step=0.1,
+            help="Ground-surface elevation relative to mean sea level (MSL).",
+        )
+        default_water_elevation = ground_surface_elevation - default_water_depth
+        water_table_elevation = st.number_input(
+            f"Water-table elevation above MSL ({depth_unit})",
+            min_value=-10000.0,
+            max_value=10000.0,
+            value=default_water_elevation,
+            step=0.1,
+            help="Water-table elevation relative to the same MSL datum as the ground-surface elevation.",
+        )
+        water_table = water_table_depth_from_inputs(
+            water_table_input_mode,
+            ground_surface_elevation=ground_surface_elevation,
+            water_table_elevation=water_table_elevation,
+        )
+    water_position = "below" if water_table >= 0 else "above"
+    st.caption(
+        f"Water table is {abs(water_table):g} {depth_unit} {water_position} ground surface."
+    )
     st.caption(
         "Triggering-PGA mode solves for the surface acceleration that gives "
         "factor of safety 1.0 in each included layer."
@@ -327,6 +426,8 @@ with st.sidebar:
         f"CE {energy_pct / 60:.2f} · "
         f"CB {1.0 if borehole_inches == 4 else 1.05 if borehole_inches == 6 else 1.15:.2f}"
     )
+
+show_msf_methods(msf_methods, float(magnitude))
 
 st.subheader("Boring log")
 left, right = st.columns([1.4, 1], vertical_alignment="bottom")
@@ -416,27 +517,51 @@ st.caption("The Analyze checkbox is per layer. Uncheck any layer to omit it from
 run = st.button("Calculate liquefaction potential", type="primary", use_container_width=True)
 if run:
     try:
-        results, summary = calculate_profile(
-            st.session_state.layer_frame,
-            units=units,
-            magnitude=float(magnitude),
-            pga=float(pga),
-            water_table=float(water_table),
-            energy_pct=float(energy_pct),
-            borehole_inches=borehole_inches,
-            rod_length=float(rod_length),
-            sampler=sampler,
-            rd_mode=rd_mode,
-            analysis_mode=analysis_mode,
+        if not msf_methods:
+            raise ValueError("Select at least one MSF method.")
+        comparison_rows = []
+        primary_results = primary_summary = None
+        for method in msf_methods:
+            results, summary = calculate_profile(
+                st.session_state.layer_frame,
+                units=units,
+                magnitude=float(magnitude),
+                pga=float(pga),
+                water_table=float(water_table),
+                energy_pct=float(energy_pct),
+                borehole_inches=borehole_inches,
+                rod_length=float(rod_length),
+                sampler=sampler,
+                rd_mode=rd_mode,
+                analysis_mode=analysis_mode,
+                msf_method=method,
+            )
+            if primary_results is None:
+                primary_results, primary_summary = results, summary
+            comparison_rows.append(
+                {
+                    "MSF method": method,
+                    "MSF": summary["msf"],
+                    "Minimum FS": summary["minimum_fs"],
+                    "Minimum triggering PGA (g)": summary["minimum_trigger_pga"],
+                    "Governing layer": summary["governing_layer"],
+                }
+            )
+        comparison = pd.DataFrame(comparison_rows)
+        st.session_state.analysis_result = (
+            primary_results,
+            primary_summary,
+            units,
+            comparison,
         )
-        st.session_state.analysis_result = (results, summary, units)
     except Exception as exc:
         st.error(str(exc))
 
 if st.session_state.analysis_result is not None:
     st.subheader("Layer-by-layer results")
-    results, summary, result_units = st.session_state.analysis_result
+    results, summary, result_units, comparison = st.session_state.analysis_result
     display_results(results, summary, result_units)
+    display_msf_comparison(comparison)
 
 with st.expander("Calculation scope and assumptions"):
     st.markdown(
