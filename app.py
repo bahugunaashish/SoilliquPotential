@@ -301,12 +301,29 @@ def display_factor_safety_depth_plot(results: pd.DataFrame, units: str) -> None:
         return
 
     depth_column = f"Depth ({'m' if units == 'Metric' else 'ft'})"
+    fs_min = min(float(plot_data["Factor of safety"].min()), 1.0)
+    fs_max = max(float(plot_data["Factor of safety"].max()), 1.0)
+    fs_padding = max((fs_max - fs_min) * 0.06, 0.05)
+    fs_domain = [max(0.0, fs_min - fs_padding), fs_max + fs_padding]
+    plotted_layers = results.loc[
+        results["layer"].isin(plot_data["Layer"])
+    ]
+    max_depth = float(plotted_layers["bottom"].max())
+    depth_padding = max(max_depth * 0.03, 0.1)
     profile = (
         alt.Chart(plot_data)
         .mark_circle(size=95, opacity=0.85)
         .encode(
-            x=alt.X("Factor of safety:Q", title="Factor of safety (FS)", scale=alt.Scale(zero=True)),
-            y=alt.Y(depth_column + ":Q", title=depth_column, scale=alt.Scale(reverse=True)),
+            x=alt.X(
+                "Factor of safety:Q",
+                title="Factor of safety (FS)",
+                scale=alt.Scale(domain=fs_domain, nice=False, zero=False),
+            ),
+            y=alt.Y(
+                depth_column + ":Q",
+                title=depth_column,
+                scale=alt.Scale(domain=[0, max_depth + depth_padding], reverse=True, nice=False),
+            ),
             color=alt.Color("Soil:N", title="Soil type"),
             tooltip=[
                 "Layer:N",
@@ -321,7 +338,10 @@ def display_factor_safety_depth_plot(results: pd.DataFrame, units: str) -> None:
         .mark_rule(color="#c2413b", strokeDash=[6, 4])
         .encode(x=alt.X("fs_reference:Q"))
     )
-    st.altair_chart(reference + profile, use_container_width=True)
+    chart = (reference + profile).properties(height=420).configure_view(
+        stroke="#64748b", strokeWidth=1.2
+    )
+    st.altair_chart(chart, use_container_width=True)
     st.caption("Depth increases downward. The dashed line marks FS = 1. Excluded layers are not plotted.")
 
 
