@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import html
+import math
 from io import BytesIO
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -271,6 +273,56 @@ def display_msf_comparison(comparison: pd.DataFrame) -> None:
             comparison.set_index("MSF method")[["Minimum triggering PGA (g)"]],
             height=260,
         )
+
+
+def factor_safety_depth_frame(results: pd.DataFrame, units: str) -> pd.DataFrame:
+    """Prepare included finite layer results for the factor-of-safety profile plot."""
+    included = results.loc[results["included"].astype(bool)].copy()
+    included["fs"] = pd.to_numeric(included["fs"], errors="coerce")
+    included = included.loc[included["fs"].map(math.isfinite)]
+    depth_unit = "m" if units == "Metric" else "ft"
+    return included.rename(
+        columns={
+            "mid_depth": f"Depth ({depth_unit})",
+            "fs": "Factor of safety",
+            "layer": "Layer",
+            "soil": "Soil",
+        }
+    )[[f"Depth ({depth_unit})", "Factor of safety", "Layer", "Soil"]].sort_values(
+        f"Depth ({depth_unit})"
+    )
+
+
+def display_factor_safety_depth_plot(results: pd.DataFrame, units: str) -> None:
+    st.subheader("Factor of safety by depth")
+    plot_data = factor_safety_depth_frame(results, units)
+    if plot_data.empty:
+        st.info("No included layers have a factor-of-safety result to plot.")
+        return
+
+    depth_column = f"Depth ({'m' if units == 'Metric' else 'ft'})"
+    profile = (
+        alt.Chart(plot_data)
+        .mark_circle(size=95, opacity=0.85)
+        .encode(
+            x=alt.X("Factor of safety:Q", title="Factor of safety (FS)", scale=alt.Scale(zero=True)),
+            y=alt.Y(depth_column + ":Q", title=depth_column, scale=alt.Scale(reverse=True)),
+            color=alt.Color("Soil:N", title="Soil type"),
+            tooltip=[
+                "Layer:N",
+                "Soil:N",
+                alt.Tooltip(depth_column + ":Q", format=".2f"),
+                alt.Tooltip("Factor of safety:Q", format=".3f"),
+            ],
+        )
+    )
+    reference = (
+        alt.Chart(pd.DataFrame({"fs_reference": [1.0]}))
+        .mark_rule(color="#c2413b", strokeDash=[6, 4])
+        .encode(x=alt.X("fs_reference:Q"))
+    )
+    st.altair_chart(reference + profile, use_container_width=True)
+    st.caption("Depth increases downward. The dashed line marks FS = 1. Excluded layers are not plotted.")
 
 
 def show_msf_methods(methods: list[str], magnitude: float) -> None:
@@ -562,6 +614,7 @@ if st.session_state.analysis_result is not None:
     results, summary, result_units, comparison = st.session_state.analysis_result
     display_results(results, summary, result_units)
     display_msf_comparison(comparison)
+    display_factor_safety_depth_plot(results, result_units)
 
 with st.expander("Calculation scope and assumptions"):
     st.markdown(

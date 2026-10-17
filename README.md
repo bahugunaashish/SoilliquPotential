@@ -10,6 +10,7 @@ An interactive Streamlit application for preliminary, SPT-based liquefaction tri
 - Choose whether to enter groundwater as depth below ground surface or as ground-surface and water-table elevations above mean sea level (MSL). The app converts either choice to water-table depth for stress calculations.
 - Apply SPT energy, borehole diameter, rod-length, and sampler corrections, then calculate normalized SPT values, fines adjustment, resistance, demand, factor of safety, and triggering PGA.
 - Analyze at a user-entered design PGA, or solve for triggering PGA at a factor of safety of 1.0.
+- View a factor-of-safety scatter plot by layer midpoint depth, with depth increasing downward and a reference line at FS = 1.
 - Select the Idriss (1999) MSF equation by default, or compare it with digitized MSF curves from the supplied reference figure.
 - Exclude any layer with its Analyze checkbox. CH and MH soil codes start excluded and can be included by checking the box.
 - Import a boring log from CSV or Excel and download a matching import template.
