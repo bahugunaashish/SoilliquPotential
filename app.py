@@ -417,7 +417,7 @@ with st.sidebar:
     rd_mode = st.selectbox(
         "Depth-reduction magnitude",
         ["workbook", "event"],
-        format_func=lambda value: "Workbook formula (Mw = 7.5)"
+        format_func=lambda value: "Default (Mw = 7.5)"
         if value == "workbook"
         else "Use entered earthquake magnitude",
     )
