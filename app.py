@@ -6,7 +6,6 @@ import math
 from io import BytesIO
 from pathlib import Path
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -310,38 +309,50 @@ def display_factor_safety_depth_plot(results: pd.DataFrame, units: str) -> None:
     ]
     max_depth = float(plotted_layers["bottom"].max())
     depth_padding = max(max_depth * 0.03, 0.1)
-    profile = (
-        alt.Chart(plot_data)
-        .mark_circle(size=95, opacity=0.85)
-        .encode(
-            x=alt.X(
-                "Factor of safety:Q",
-                title="Factor of safety (FS)",
-                scale=alt.Scale(domain=fs_domain, nice=False, zero=False),
-            ),
-            y=alt.Y(
-                depth_column + ":Q",
-                title=depth_column,
-                scale=alt.Scale(domain=[0, max_depth + depth_padding], reverse=True, nice=False),
-            ),
-            color=alt.Color("Soil:N", title="Soil type"),
-            tooltip=[
-                "Layer:N",
-                "Soil:N",
-                alt.Tooltip(depth_column + ":Q", format=".2f"),
-                alt.Tooltip("Factor of safety:Q", format=".3f"),
-            ],
-        )
-    )
-    reference = (
-        alt.Chart(pd.DataFrame({"fs_reference": [1.0]}))
-        .mark_rule(color="#c2413b", strokeDash=[6, 4])
-        .encode(x=alt.X("fs_reference:Q"))
-    )
-    chart = (reference + profile).properties(height=420).configure_view(
-        stroke="#64748b", strokeWidth=1.2
-    )
-    st.altair_chart(chart, use_container_width=True)
+    chart_spec = {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "height": 420,
+        "layer": [
+            {
+                "data": {"values": [{"fs_reference": 1.0}]},
+                "mark": {"type": "rule", "color": "#c2413b", "strokeDash": [6, 4]},
+                "encoding": {
+                    "x": {
+                        "field": "fs_reference",
+                        "type": "quantitative",
+                        "scale": {"domain": fs_domain, "nice": False, "zero": False},
+                        "axis": {"title": "Factor of safety (FS)"},
+                    }
+                },
+            },
+            {
+                "mark": {"type": "point", "filled": True, "size": 95, "opacity": 0.85},
+                "encoding": {
+                    "x": {
+                        "field": "Factor of safety",
+                        "type": "quantitative",
+                        "scale": {"domain": fs_domain, "nice": False, "zero": False},
+                        "axis": {"title": "Factor of safety (FS)"},
+                    },
+                    "y": {
+                        "field": depth_column,
+                        "type": "quantitative",
+                        "scale": {"domain": [max_depth + depth_padding, 0], "nice": False},
+                        "axis": {"title": depth_column},
+                    },
+                    "color": {"field": "Soil", "type": "nominal", "title": "Soil type"},
+                    "tooltip": [
+                        {"field": "Layer", "type": "nominal"},
+                        {"field": "Soil", "type": "nominal"},
+                        {"field": depth_column, "type": "quantitative", "format": ".2f"},
+                        {"field": "Factor of safety", "type": "quantitative", "format": ".3f"},
+                    ],
+                },
+            },
+        ],
+        "config": {"view": {"stroke": "#64748b", "strokeWidth": 1.2}},
+    }
+    st.vega_lite_chart(plot_data, chart_spec, use_container_width=True)
     st.caption("Depth increases downward. The dashed line marks FS = 1. Excluded layers are not plotted.")
 
 
