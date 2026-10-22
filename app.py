@@ -102,23 +102,29 @@ def on_layer_count_change(units: str) -> None:
 
 
 def on_table_change() -> None:
-    edited = st.session_state.layer_editor.copy().drop(columns=["thickness"], errors="ignore")
+    # Streamlit stores data_editor widget state as a dict of row edits, additions,
+    # and deletions. The edited DataFrame is returned by st.data_editor below.
+    editor_state = st.session_state.get("layer_editor", {})
+    if not isinstance(editor_state, dict):
+        editor_state = {}
+    added_rows = editor_state.get("added_rows", [])
+    deleted_rows = editor_state.get("deleted_rows", [])
+    row_count = len(st.session_state.layer_frame) + len(added_rows) - len(deleted_rows)
+    st.session_state.layer_count = max(1, min(50, row_count))
+    st.session_state.analysis_result = None
+
+
+def process_table_change(edited: pd.DataFrame, previous: list[str]) -> pd.DataFrame:
+    """Normalize the DataFrame returned by st.data_editor after a user edit."""
+    edited = edited.drop(columns=["thickness"], errors="ignore")
     edited = remove_blank_rows(edited)
-    previous = st.session_state.get("soil_snapshot", [])
     if "analyze" not in edited.columns:
         edited["analyze"] = True
     for i, code in enumerate(edited.get("soil_code", [])):
         old_code = previous[i] if i < len(previous) else ""
         if clean_code(code) != clean_code(old_code) and is_default_excluded(code):
             edited.at[i, "analyze"] = False
-    edited = edited[REQUIRED_COLUMNS + ["analyze"]].reset_index(drop=True)
-    st.session_state.layer_frame = edited
-    st.session_state.soil_snapshot = edited["soil_code"].fillna("").astype(str).tolist()
-    st.session_state.layer_count = len(edited)
-    st.session_state.analysis_result = None
-    display = edited.copy()
-    display["thickness"] = display["bottom_depth"] - display["top_depth"]
-    st.session_state.layer_editor = display
+    return edited[REQUIRED_COLUMNS + ["analyze"]].reset_index(drop=True)
 
 
 def template_for_units(units: str) -> pd.DataFrame:
@@ -584,12 +590,14 @@ edited = st.data_editor(
         "analyze": st.column_config.CheckboxColumn("Analyze", help="CH/MH are off by default. Check to include or uncheck any layer to exclude."),
     },
 )
-edited = edited.drop(columns=["thickness"], errors="ignore")
-edited = remove_blank_rows(edited)
-if "analyze" not in edited.columns:
-    edited["analyze"] = True
-st.session_state.layer_frame = edited[REQUIRED_COLUMNS + ["analyze"]].reset_index(drop=True)
-st.session_state.soil_snapshot = st.session_state.layer_frame["soil_code"].fillna("").astype(str).tolist()
+previous_soil_snapshot = st.session_state.get("soil_snapshot", [])
+edited = process_table_change(edited, previous_soil_snapshot)
+normalized = edited[REQUIRED_COLUMNS + ["analyze"]].reset_index(drop=True)
+previous_frame = st.session_state.layer_frame[REQUIRED_COLUMNS + ["analyze"]].reset_index(drop=True)
+if not normalized.equals(previous_frame):
+    st.session_state.analysis_result = None
+st.session_state.layer_frame = normalized
+st.session_state.soil_snapshot = normalized["soil_code"].fillna("").astype(str).tolist()
 
 profile_col, _ = st.columns([1, 1.4])
 with profile_col:
